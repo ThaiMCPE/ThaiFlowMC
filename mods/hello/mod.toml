@@ -1,0 +1,7 @@
+id = "hello"
+name = "Hello Mod"
+version = "1.0.0"
+entrypoint = "main.py"
+
+[dependencies]
+thaiflowmc = ">=0.1.0"
