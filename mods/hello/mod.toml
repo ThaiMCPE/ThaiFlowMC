@@ -5,3 +5,11 @@ entrypoint = "main.py"
 
 [dependencies]
 thaiflowmc = ">=0.1.0"
+
+# Every capability below defaults to false (deny) even without this table.
+# hello doesn't need any of them; it's spelled out here just as a reference
+# for other mod authors. See docs/ARCHITECTURE.md's "Security" section.
+[permissions]
+storage = false
+network = false
+filesystem = false

@@ -54,15 +54,15 @@ class PythonRuntimeTest {
 
                 @event("test")
                 def on_test(payload):
-                    payload.add("received")
+                    payload.record("received")
                 """);
 
         runtime.execute(handle(), eventBus);
 
-        List<String> received = new ArrayList<>();
-        eventBus.fire("test", received);
+        Recorder recorder = new Recorder();
+        eventBus.fire("test", recorder);
 
-        assertEquals(List.of("received"), received);
+        assertEquals(List.of("received"), recorder.entries);
     }
 
     @Test

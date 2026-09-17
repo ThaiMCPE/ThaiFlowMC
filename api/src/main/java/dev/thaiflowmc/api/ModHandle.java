@@ -11,8 +11,14 @@ import java.nio.file.Path;
  * @param modId       the mod's unique id
  * @param sourceDirectory the mod's directory on disk, e.g. for locating textures
  * @param entrypoint  path to the mod's entrypoint script, relative to {@code sourceDirectory}
+ * @param permissions the mod's declared capabilities; default-deny (see {@link ModPermissions#DENY_ALL})
  */
-public record ModHandle(String modId, Path sourceDirectory, String entrypoint) {
+public record ModHandle(String modId, Path sourceDirectory, String entrypoint, ModPermissions permissions) {
+
+    /** Convenience constructor for a mod with no elevated permissions (the common case). */
+    public ModHandle(String modId, Path sourceDirectory, String entrypoint) {
+        this(modId, sourceDirectory, entrypoint, ModPermissions.DENY_ALL);
+    }
 
     public Path entrypointFile() {
         return sourceDirectory.resolve(entrypoint);

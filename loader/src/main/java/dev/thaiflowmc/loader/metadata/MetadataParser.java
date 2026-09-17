@@ -1,5 +1,6 @@
 package dev.thaiflowmc.loader.metadata;
 
+import dev.thaiflowmc.api.ModPermissions;
 import dev.thaiflowmc.loader.error.InvalidModIdException;
 import dev.thaiflowmc.loader.error.InvalidModTomlException;
 import dev.thaiflowmc.loader.error.InvalidVersionException;
@@ -56,7 +57,14 @@ public final class MetadataParser {
         }
         String id = sanitizeId(folderName);
         return new ModMetadata(
-                id, folderName, Version.parse(DEFAULT_VERSION), DEFAULT_ENTRYPOINT, List.of(), modDirectory, true);
+                id,
+                folderName,
+                Version.parse(DEFAULT_VERSION),
+                DEFAULT_ENTRYPOINT,
+                List.of(),
+                modDirectory,
+                true,
+                ModPermissions.DENY_ALL);
     }
 
     private ModMetadata describedMetadata(Path modDirectory, String folderName, Path tomlPath) {
@@ -99,8 +107,20 @@ public final class MetadataParser {
         }
 
         List<ModDependency> dependencies = parseDependencies(toml, name);
+        ModPermissions permissions = parsePermissions(toml);
 
-        return new ModMetadata(id, name, version, entrypoint, dependencies, modDirectory, false);
+        return new ModMetadata(id, name, version, entrypoint, dependencies, modDirectory, false, permissions);
+    }
+
+    private ModPermissions parsePermissions(TomlParseResult toml) {
+        TomlTable permissionsTable = toml.getTable("permissions");
+        if (permissionsTable == null) {
+            return ModPermissions.DENY_ALL;
+        }
+        boolean storage = permissionsTable.getBoolean("storage", () -> false);
+        boolean network = permissionsTable.getBoolean("network", () -> false);
+        boolean filesystem = permissionsTable.getBoolean("filesystem", () -> false);
+        return new ModPermissions(storage, network, filesystem);
     }
 
     private List<ModDependency> parseDependencies(TomlParseResult toml, String modName) {

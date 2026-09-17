@@ -57,11 +57,75 @@ This is the exact call sequence `Launcher.run(modsDirectory)` performs, and what
 Each mod gets its **own GraalPy `Context`**, created independently (not sharing an `Engine`, a Python `sys.modules` cache, or any global variables with other mods). This is the simplest possible isolation mechanism and was chosen over one shared interpreter with per-mod namespacing because:
 
 - It's impossible for one mod to accidentally read or overwrite another mod's globals, monkey-patched builtins, or imported module state - there is no shared state to corrupt.
-- It keeps the security story simple: a `Context` is also where future per-mod permissions (`filesystem`, `network`, `java_interop` in a future `mod.toml`) would naturally be enforced, one `Context.Builder` setting at a time.
+- It keeps the security story simple: a `Context` is also where per-mod permissions (`mod.toml`'s `[permissions]` table - `storage`, `network`, `filesystem`) are enforced, one `Context.Builder` setting at a time. See "Security" below for the full picture.
 
 The trade-off is memory and startup cost: N mods means N GraalPy contexts, each with its own interpreter state. For the scale ThaiFlowMC targets (a modpack's worth of small mods, not hundreds of heavyweight ones) this is an acceptable and reversible choice - nothing about the `ModEntrypointExecutor` contract prevents a future implementation from sharing an `Engine` across contexts for warm-up caching while keeping contexts (and thus globals) separate.
 
-Contexts are also **denied host class lookup** (`allowHostClassLookup(name -> false)`): Python code can call methods on objects ThaiFlowMC explicitly hands it (the bridge, a `Player`, a `GameServer`), but cannot do `java.type("java.lang.Runtime")` or otherwise reach arbitrary JVM classes. Combined with the fact that `PythonBridge` only exposes `subscribe(...)` and `registerItem(...)`, a mod's "host surface area" is exactly those two calls - there is no generic escape hatch today.
+## Security
+
+Mods are **untrusted by default.** Every restriction below applies to every mod unless its `mod.toml` explicitly opts into more (see "Permissions" below) - there is no mod that gets a pass.
+
+### The SandboxPolicy finding
+
+GraalVM's `Context.Builder.sandbox(SandboxPolicy)` is the officially documented way to get a named, validated bundle of restrictions (`CONSTRAINED`, `ISOLATED`, `UNTRUSTED`) - including isolate-based heap separation at the stricter levels. **It does not work for GraalPy.** Confirmed empirically (not from documentation) while building this:
+
+```
+java.lang.IllegalArgumentException: The validation for the given sandbox policy CONSTRAINED failed.
+The language python can only be used up to the TRUSTED sandbox policy.
+```
+
+This is true at every level stricter than `TRUSTED`, for every one of `CONSTRAINED`/`ISOLATED`/`UNTRUSTED`, on the exact GraalPy version this project depends on. Practically, this means:
+
+- **No isolate-based heap limit is available.** Every mod's Python allocations share the host JVM's ordinary heap. Nothing in this stack bounds how much of it one mod can consume - see `PythonSandboxSecurityTest.memoryAbuseIsNotYetContained_knownGap` and "Future: Strict Isolation Mode" in `docs/ROADMAP.md`, which is the planned real fix (an OS process boundary per mod, with real OS-level memory limits).
+- Every other restriction `SandboxPolicy` would have bundled together is instead applied **individually**, directly on `Context.Builder`, in `PythonRuntime.execute(...)`. There is no single call that replaces this list; each line is a deliberate, separately-justified restriction.
+
+### What's denied by default, and how
+
+| Restriction | Mechanism |
+|---|---|
+| Reflective access to arbitrary host objects | A custom `HostAccess` (`PythonRuntime.HOST_ACCESS`): only `@HostAccess.Export`-annotated methods are callable at all - no public-method reflection, no functional-interface conversion, no mutable target-type mappings. See "No raw host objects" below. |
+| Reaching arbitrary JVM classes (`java.type(...)`, reflection to escape a view object) | `allowHostClassLookup(name -> false)` |
+| Filesystem | `allowIO(IOAccess.NONE)` unless a permission (below) grants otherwise |
+| Network sockets | Denied unless `[permissions] network = true` |
+| Environment variables | `allowEnvironmentAccess(EnvironmentAccess.NONE)` |
+| Spawning threads | `allowCreateThread(false)` |
+| Spawning processes / subshells | `allowCreateProcess(false)` |
+| Native code / native Python extensions | `allowNativeAccess(false)` - GraalPy native extensions get native access by definition, so this is also what keeps them out |
+| Infinite loops / hangs | `ExecutionGuard`: every call into a mod's Python (`@load`, an event handler) runs with a deadline; if it's not back in time, the mod's whole `Context` is force-closed, interrupting execution at the next Truffle safepoint. A runaway mod is treated as unrecoverable, not merely slow - see its Javadoc for why. |
+| Flooding stdout/stderr | `CappingOutputStream`: throws once a mod has written more than a fixed budget over its lifetime |
+| One mod reading another mod's state | Falls out of the isolation model above (separate `Context`, no shared bindings) - `PythonSandboxSecurityTest.modsCannotSeeEachOthersGlobalState` asserts this directly |
+
+`PythonSandboxSecurityTest` has one test attempting each row above (filesystem escape, network, subprocess, host class lookup, reflection on an unexported object, environment access, infinite loop, excessive output, cross-mod access) - a regression there is a security regression, not a test flake to silence.
+
+### No raw host objects
+
+Mods never receive a real `Player`, `GameServer`, or anything else from `api`/`minecraft-adapter` directly. Every event payload of those types is wrapped first (`PythonBridge.toSafePayload`) in a narrow, `python-runtime`-local view class - `PlayerView`, `GameServerView` - whose only members are the handful of `@HostAccess.Export`-annotated methods a mod is meant to call. This means a future real-Minecraft `Player` implementation that happens to expose more public methods than today's `SimulatedPlayer`/`UnconnectedGameServer` do can never accidentally widen what a mod can reach - the view classes are the only thing Python ever sees, regardless of what the real implementation behind them supports. `PythonBridge` itself is exposed the same way: two `@HostAccess.Export` methods (`subscribe`, `registerItem`), nothing else.
+
+### Permissions
+
+A mod's `mod.toml` may declare:
+
+```toml
+[permissions]
+storage = true
+network = false
+filesystem = false
+```
+
+Default (no `[permissions]` table at all, including every zero-config mod) is **deny everything** - `ModPermissions.DENY_ALL`. See `ModPermissions`' Javadoc for what each flag does; in short:
+
+- **`storage`**: a private directory just for this mod (today: a sibling of `mods/` named `mod_data/<modId>`), enforced by `ScopedFileSystem` - every path a mod's Python code touches is resolved and checked against that one directory, rejecting `..` escapes and unrelated absolute paths alike. This is the one most mods that need to persist anything should ask for.
+- **`network`**: outbound sockets (`allowHostSocketAccess`).
+- **`filesystem`**: broad host filesystem access, not scoped to any directory - coarse today, and the most trusting of the three. Prefer `storage`.
+
+There is no separate `TRUSTED` mode/flag implemented today (e.g. a hypothetical `java_interop = true` reverting to unrestricted host access). Every additional escape hatch is exactly the kind of thing this security pass exists to avoid adding speculatively - one hasn't been added without an actual mod that needs it. If one is added later, the rule is the one the product brief states: it must be an explicit, loud, per-mod opt-in, and it must never silently weaken what an `UNTRUSTED` mod (i.e. every mod without that opt-in) gets.
+
+### Honest limits
+
+- **Memory/heap is not bounded.** See the SandboxPolicy finding above.
+- **CPU time is bounded only per-call, not cumulatively**, and only via wall-clock deadline + cancellation, not a true CPU-time or statement-count budget (GraalVM's `ResourceLimits.statementLimit` exists and works, but is scoped to a `Context`'s entire lifetime, not per-call - a poor fit for mods whose contexts live for the whole server run; see `ExecutionGuard`'s Javadoc).
+- **A timed-out mod is not automatically recoverable** - `ExecutionGuard` force-closes the whole `Context`, ending that mod's ability to handle any future event, not just the one slow call. Restarting a single mod's context without restarting the server isn't implemented.
+- **All of the above run in the same JVM process as everything else** (`STANDARD` mode). See "Future: Strict Isolation Mode" in `docs/ROADMAP.md` for the process-boundary design that would close these gaps properly, and for which parts of today's design were deliberately kept transport-agnostic so mods won't need rewriting when it lands.
 
 ## Error handling
 

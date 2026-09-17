@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.thaiflowmc.api.ModEntrypointExecutor;
 import dev.thaiflowmc.api.ModHandle;
+import dev.thaiflowmc.api.ModPermissions;
 import dev.thaiflowmc.api.event.EventBus;
 import dev.thaiflowmc.api.event.SimpleEventBus;
 import dev.thaiflowmc.loader.model.ModContainer;
@@ -18,7 +19,8 @@ import org.junit.jupiter.api.Test;
 class ModLoaderTest {
 
     private static ModContainer container(String id) {
-        return new ModContainer(new ModMetadata(id, id, Version.parse("1.0.0"), "main.py", List.of(), Path.of("."), false));
+        return new ModContainer(new ModMetadata(
+                id, id, Version.parse("1.0.0"), "main.py", List.of(), Path.of("."), false, ModPermissions.DENY_ALL));
     }
 
     @Test

@@ -21,6 +21,10 @@ final class PythonErrorFormatter {
     }
 
     static String format(String scriptName, PolyglotException e) {
+        if (e.isCancelled()) {
+            return "This took too long to run and was stopped (possible infinite loop). "
+                    + "The mod cannot run any more code after this, including future events.";
+        }
         if (e.isHostException()) {
             Throwable host = e.asHostException();
             return host.getMessage() != null ? host.getMessage() : host.toString();

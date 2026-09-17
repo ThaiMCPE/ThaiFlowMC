@@ -119,7 +119,7 @@ Requirements once `STRICT` is built:
 - Each worker gets independent CPU/memory/time limits.
 - Workers never receive raw Java or Minecraft objects - only messages representing stable ThaiFlowMC concepts (see the flow below).
 - Every message from a worker is untrusted input: message type, payload size, ids, arguments, permissions, and rate limits are all validated before any Minecraft operation runs.
-- Permissions/capabilities (see the security section below) are enforced at the IPC boundary, not just inside the worker.
+- Permissions/capabilities (see "Security" in docs/ARCHITECTURE.md) are enforced at the IPC boundary, not just inside the worker.
 - Mods cannot talk to other mod workers unless explicitly permitted; per-mod storage stays isolated exactly as it would in-process.
 - Worker restart/termination should be possible without restarting Minecraft, where practical.
 
@@ -137,7 +137,7 @@ STRICT (future):   Python mod -> player.say("Hello") -> IPC request -> permissio
 - Already transport-friendly: the Python-facing API (`item(...)`, `@event(name)`, `@load`, the sugar decorators) never exposes a Java/GraalPy type to mod authors - see `thaiflow_bootstrap.py`. `EventBus`'s events are plain strings + plain-old-data payloads (`Player`, `GameServer` are already just interfaces with primitive-typed methods, not raw Minecraft objects). The `ModHandle`/`ModEntrypointExecutor` contract between `loader` and `python-runtime` is already just an id, a path, and a filename - trivially serializable.
 - Not transport-friendly yet: `PythonBridge.subscribe(String eventName, Value callback)` hands GraalPy a live, in-process `org.graalvm.polyglot.Value` handle to the Java side, and calls `callback.execute(payload)` directly (`PythonBridge.java`). A `Value` cannot cross a process boundary. Moving to `STRICT` means this becomes "the worker declares it wants event X" (a serializable subscription message) with actual dispatch happening as a separate IPC call *into* the worker when Java fires that event - a real, but contained, change localized to `python-runtime`'s bridge layer, not to the Python API mod authors write.
 
-Not blocking current development: `STANDARD` mode (this repository's entire focus today) is a legitimate, real security boundary on its own via GraalPy sandboxing (see the security section below), and nothing above requires `STRICT` to exist yet. This section exists so later work doesn't have to fight today's decisions.
+Not blocking current development: `STANDARD` mode (this repository's entire focus today) is a legitimate, real security boundary on its own via GraalPy sandboxing (see "Security" in docs/ARCHITECTURE.md), and nothing above requires `STRICT` to exist yet. This section exists so later work doesn't have to fight today's decisions.
 
 ## Explicitly out of scope until the above lands
 

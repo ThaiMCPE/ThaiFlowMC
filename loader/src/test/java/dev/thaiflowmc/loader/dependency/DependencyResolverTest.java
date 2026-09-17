@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.thaiflowmc.api.ModPermissions;
 import dev.thaiflowmc.loader.error.CyclicDependencyException;
 import dev.thaiflowmc.loader.error.IncompatibleDependencyException;
 import dev.thaiflowmc.loader.error.MissingDependencyException;
@@ -30,7 +31,8 @@ class DependencyResolverTest {
                 dependencies.add(new ModDependency(deps[i], VersionRequirement.parse(deps[i + 1])));
             }
         }
-        return new ModMetadata(id, id, Version.parse("1.0.0"), "main.py", dependencies, SOURCE, false);
+        return new ModMetadata(
+                id, id, Version.parse("1.0.0"), "main.py", dependencies, SOURCE, false, ModPermissions.DENY_ALL);
     }
 
     @Test

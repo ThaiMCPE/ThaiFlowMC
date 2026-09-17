@@ -1,5 +1,6 @@
 package dev.thaiflowmc.loader.model;
 
+import dev.thaiflowmc.api.ModPermissions;
 import java.nio.file.Path;
 import java.util.List;
 
@@ -16,6 +17,8 @@ import java.util.List;
  * @param sourceDirectory the mod's directory on disk
  * @param zeroConfig      true if this mod had no {@code mod.toml} and every
  *                        field above was inferred
+ * @param permissions     the mod's declared capabilities; {@link ModPermissions#DENY_ALL}
+ *                        unless {@code mod.toml} has a {@code [permissions]} table
  */
 public record ModMetadata(
         String id,
@@ -24,7 +27,8 @@ public record ModMetadata(
         String entrypoint,
         List<ModDependency> dependencies,
         Path sourceDirectory,
-        boolean zeroConfig) {
+        boolean zeroConfig,
+        ModPermissions permissions) {
 
     public Path entrypointFile() {
         return sourceDirectory.resolve(entrypoint);

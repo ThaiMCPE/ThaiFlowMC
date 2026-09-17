@@ -40,7 +40,8 @@ public final class ModLoader {
 
     public void load(ModContainer container) {
         ModMetadata metadata = container.metadata();
-        ModHandle handle = new ModHandle(metadata.id(), metadata.sourceDirectory(), metadata.entrypoint());
+        ModHandle handle =
+                new ModHandle(metadata.id(), metadata.sourceDirectory(), metadata.entrypoint(), metadata.permissions());
         container.markResolved();
         try {
             executor.execute(handle, eventBus);

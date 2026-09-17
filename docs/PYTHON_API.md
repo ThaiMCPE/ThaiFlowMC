@@ -104,4 +104,22 @@ A mistake while your mod is loading (its `main.py`, or a `@load` callback) stops
 
 ## Mod isolation
 
-Every mod runs in its own, separate Python interpreter. Two mods can both `import thaiflow`, define a `player_join` handler, or use the same variable names, without ever seeing each other's state - there is no shared global namespace between mods. See "Isolation model" in `docs/ARCHITECTURE.md` for the trade-offs of this design and where per-mod permissions (filesystem/network/Java interop) would plug in later.
+Every mod runs in its own, separate Python interpreter. Two mods can both `import thaiflow`, define a `player_join` handler, or use the same variable names, without ever seeing each other's state - there is no shared global namespace between mods. Your mod is also untrusted by default: no filesystem, no network, no subprocesses, no reaching Java classes - see "Security" in `docs/ARCHITECTURE.md` for the full list and why.
+
+## Permissions
+
+If your mod needs to save data, declare it in `mod.toml`:
+
+```toml
+[permissions]
+storage = true
+```
+
+With that, ordinary file I/O just works, scoped to a private directory only your mod can see:
+
+```python
+with open("save.txt", "w") as f:
+    f.write("hello")
+```
+
+Everything you write stays inside your mod's own storage - there's no way to read or write anywhere else, including another mod's storage or your mod's own source files. Leave `[permissions]` out entirely (as every zero-config, `main.py`-only mod does) and you get none of this - which is exactly right for a mod that doesn't need to persist anything.
