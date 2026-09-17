@@ -1,13 +1,7 @@
 package dev.thaiflowmc.adapter.mc;
 
 import java.lang.instrument.ClassFileTransformer;
-import java.nio.charset.StandardCharsets;
 import java.security.ProtectionDomain;
-import org.objectweb.asm.ClassReader;
-import org.objectweb.asm.ClassVisitor;
-import org.objectweb.asm.ClassWriter;
-import org.objectweb.asm.MethodVisitor;
-import org.objectweb.asm.Opcodes;
 
 /**
  * Finds Minecraft's dedicated-server "finished starting" log line and
@@ -15,9 +9,9 @@ import org.objectweb.asm.Opcodes;
  * it - using plain ASM bytecode rewriting via a {@code java.lang.instrument}
  * agent, not Mixin, and not Fabric/Forge/NeoForge/Quilt.
  *
- * <p>This was verified by hand against the official Mojang server jar for
- * ThaiFlowMC's primary target, <b>26.3</b>, and against 1.21.1 (see
- * docs/ROADMAP.md for both): the log line lives in
+ * <p>This was verified by hand against the official Mojang server jars for
+ * both 26.3 (ThaiFlowMC's primary target) and 1.21.1 (see docs/ROADMAP.md
+ * for both): the log line lives in
  * {@code net.minecraft.server.dedicated.DedicatedServer.initServer()} in
  * both. 1.21.1 obfuscates that to class {@code apn}, method {@code e()};
  * 26.3 ships this class under its real name with no obfuscation at all
@@ -27,11 +21,16 @@ import org.objectweb.asm.Opcodes;
  * on the next update, obfuscated or not - this transformer looks for the
  * actual log message string constant ({@value #MARKER}), which Mojang has
  * kept stable across both versions checked and is far less likely to
- * silently change than a class or method identifier.
+ * silently change than a class or method identifier. {@link
+ * ServerStopHookTransformer} applies the same idea to {@code server_stop};
+ * both share their actual injection logic via {@link MarkerHookTransformer}.
  */
 public final class ServerStartHookTransformer implements ClassFileTransformer {
 
     static final String MARKER = "Done (";
+
+    private final MarkerHookTransformer delegate = new MarkerHookTransformer(
+            MARKER, "dev/thaiflowmc/adapter/mc/MinecraftHooks", "fireServerStarted", "()V");
 
     @Override
     public byte[] transform(
@@ -40,17 +39,7 @@ public final class ServerStartHookTransformer implements ClassFileTransformer {
             Class<?> classBeingRedefined,
             ProtectionDomain protectionDomain,
             byte[] classfileBuffer) {
-        if (!containsMarkerBytes(classfileBuffer)) {
-            return null; // tell the JVM to leave this class alone
-        }
-        try {
-            byte[] patched = transform(classfileBuffer);
-            return patched == classfileBuffer ? null : patched;
-        } catch (RuntimeException e) {
-            // A hook we can't install must never bring down class loading -
-            // and therefore the whole server - so fail open here.
-            return null;
-        }
+        return delegate.transform(loader, className, classBeingRedefined, protectionDomain, classfileBuffer);
     }
 
     /**
@@ -58,79 +47,6 @@ public final class ServerStartHookTransformer implements ClassFileTransformer {
      * or {@code classBytes} itself, unchanged, if no injection site was found.
      */
     public byte[] transform(byte[] classBytes) {
-        ClassReader reader = new ClassReader(classBytes);
-        ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_FRAMES);
-        HookInjectingVisitor visitor = new HookInjectingVisitor(writer);
-        reader.accept(visitor, 0);
-        return visitor.injected ? writer.toByteArray() : classBytes;
-    }
-
-    private static boolean containsMarkerBytes(byte[] classBytes) {
-        byte[] needle = MARKER.getBytes(StandardCharsets.UTF_8);
-        outer:
-        for (int i = 0; i <= classBytes.length - needle.length; i++) {
-            for (int j = 0; j < needle.length; j++) {
-                if (classBytes[i + j] != needle[j]) {
-                    continue outer;
-                }
-            }
-            return true;
-        }
-        return false;
-    }
-
-    private static final class HookInjectingVisitor extends ClassVisitor {
-        boolean injected;
-
-        HookInjectingVisitor(ClassVisitor cv) {
-            super(Opcodes.ASM9, cv);
-        }
-
-        @Override
-        public MethodVisitor visitMethod(
-                int access, String name, String descriptor, String signature, String[] exceptions) {
-            MethodVisitor parent = super.visitMethod(access, name, descriptor, signature, exceptions);
-            return new HookInjectingMethodVisitor(parent, this);
-        }
-    }
-
-    /**
-     * Arms itself on any {@code LDC} of a string containing {@link #MARKER},
-     * then injects the hook call immediately after the very next method
-     * call - which, for the log line this targets, is the logging call
-     * itself (e.g. {@code Logger.info(String, Object)}), always void-
-     * returning, so the operand stack is empty and safe to call into.
-     */
-    private static final class HookInjectingMethodVisitor extends MethodVisitor {
-        private final HookInjectingVisitor container;
-        private boolean armed;
-
-        HookInjectingMethodVisitor(MethodVisitor mv, HookInjectingVisitor container) {
-            super(Opcodes.ASM9, mv);
-            this.container = container;
-        }
-
-        @Override
-        public void visitLdcInsn(Object value) {
-            super.visitLdcInsn(value);
-            if (value instanceof String text && text.contains(MARKER)) {
-                armed = true;
-            }
-        }
-
-        @Override
-        public void visitMethodInsn(int opcode, String owner, String name, String descriptor, boolean isInterface) {
-            super.visitMethodInsn(opcode, owner, name, descriptor, isInterface);
-            if (armed) {
-                super.visitMethodInsn(
-                        Opcodes.INVOKESTATIC,
-                        "dev/thaiflowmc/adapter/mc/MinecraftHooks",
-                        "fireServerStarted",
-                        "()V",
-                        false);
-                armed = false;
-                container.injected = true;
-            }
-        }
+        return delegate.transform(classBytes);
     }
 }

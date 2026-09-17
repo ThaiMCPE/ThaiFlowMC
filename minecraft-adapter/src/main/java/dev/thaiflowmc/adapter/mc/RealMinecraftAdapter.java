@@ -11,8 +11,9 @@ import org.slf4j.LoggerFactory;
 
 /**
  * The real (non-simulated) {@link MinecraftAdapter}: connects {@link
- * MinecraftHooks} - the fixed call target {@link ServerStartHookTransformer}
- * injects into real Minecraft bytecode - to ThaiFlowMC's {@link EventBus}.
+ * MinecraftHooks} - the fixed call targets {@link ServerStartHookTransformer}
+ * / {@link ServerStopHookTransformer} inject into real Minecraft bytecode -
+ * to ThaiFlowMC's {@link EventBus}.
  *
  * <p>This class does not launch Minecraft itself. Actually running the
  * dedicated server with {@link ThaiFlowAgent} attached is a manual step
@@ -36,12 +37,18 @@ public final class RealMinecraftAdapter implements MinecraftAdapter {
             LOG.info("Real Minecraft server finished starting");
             eventBus.fire("server_start", new UnconnectedGameServer());
         });
-        LOG.info("Hook installed; waiting for the attached Minecraft server process to finish starting");
+        MinecraftHooks.setOnServerStopping(() -> {
+            LOG.info("Real Minecraft server is stopping");
+            eventBus.fire("server_stop", new UnconnectedGameServer());
+        });
+        LOG.info("Hooks installed; waiting for the attached Minecraft server process");
     }
 
+    /** Detaches both hooks - for tests/cleanup, not something real Minecraft calls. */
     @Override
     public void stop() {
         MinecraftHooks.setOnServerStarted(null);
+        MinecraftHooks.setOnServerStopping(null);
     }
 
     /**

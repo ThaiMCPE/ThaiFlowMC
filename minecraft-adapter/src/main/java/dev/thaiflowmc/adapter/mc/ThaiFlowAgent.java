@@ -11,9 +11,10 @@ import java.util.jar.JarOutputStream;
 
 /**
  * The {@code java.lang.instrument} entry point that installs {@link
- * ServerStartHookTransformer}. This is ThaiFlowMC's own loader mechanism for
- * hooking real Minecraft - a plain Java agent plus ASM bytecode rewriting -
- * with no dependency on Fabric Loader, Forge, NeoForge, or Quilt.
+ * ServerStartHookTransformer} and {@link ServerStopHookTransformer}. This is
+ * ThaiFlowMC's own loader mechanism for hooking real Minecraft - a plain
+ * Java agent plus ASM bytecode rewriting - with no dependency on Fabric
+ * Loader, Forge, NeoForge, or Quilt.
  *
  * <p>Attach it when launching the real Minecraft dedicated server:
  *
@@ -35,6 +36,7 @@ public final class ThaiFlowAgent {
     /** Called by the JVM when this jar is attached with {@code -javaagent} at startup. */
     public static void premain(String agentArgs, Instrumentation instrumentation) {
         instrumentation.addTransformer(new ServerStartHookTransformer());
+        instrumentation.addTransformer(new ServerStopHookTransformer());
 
         // Mojang's own server bundler (net.minecraft.bundler.Main) loads the
         // actual game through a fresh URLClassLoader whose parent deliberately

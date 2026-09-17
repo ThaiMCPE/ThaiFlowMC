@@ -73,9 +73,24 @@ In priority order (matching "server start, then player join, then server stop" f
    ./gradlew :launcher:realMinecraftIntegration
    ```
 5. Extend `RealMinecraftAdapter`'s payload to wrap the actual live server instance (today it fires with a placeholder `UnconnectedGameServer` - see its Javadoc, and the log line above) so `server.broadcast(...)` really reaches players, matching what `SimulatedMinecraftAdapter` already fakes.
-6. **`player_join`'s real hook point is already found and verified structurally** (same rigor as `server_start` - real 26.3 bytecode, not a guess), but not yet built or live-verified - see "player_join: found, not yet built" below for exactly why and what's left.
-7. `server_stop`, once `player_join` is real.
+6. ~~`server_stop`~~ **Done, live, end to end** - see "`server_stop`: done, verified live" below.
+7. **`player_join`'s real hook point is already found and verified structurally** (same rigor as `server_start` - real 26.3 bytecode, not a guess), but not yet built or live-verified - see "`player_join`: found, not yet built" below for exactly why and what's left.
 8. Only after that: begin the item/block/entity APIs the top-level spec explicitly says to defer.
+
+## `server_stop`: done, verified live
+
+Built the same way as `server_start`, and - unlike `player_join` - fully live-verifiable in this environment, since stopping a server needs no client:
+
+- **Hook point**: `net.minecraft.server.MinecraftServer.stopServer()` (real, unobfuscated name), which logs `LOGGER.info("Stopping server")` - a single-argument call, an even simpler shape than `server_start`'s two-argument one - right before saving players/worlds and disconnecting.
+- **Code reuse**: `ServerStartHookTransformer` and the new `ServerStopHookTransformer` now share their actual injection logic via a `MarkerHookTransformer` (marker string + target hook method are just constructor parameters) - refactored out once a second hook needed the exact same "arm on marker, inject after next call" behavior, rather than duplicating it.
+- **A third classloading bug, found only by testing the real, larger `MinecraftServer` class**: `ClassWriter`'s default `COMPUTE_FRAMES` behavior resolves common superclasses via `Class.forName(name, false, getClass().getClassLoader())` - i.e. through *the classloader that loaded ASM/this agent*, not the classloader actually defining the class being patched. This never surfaced against `DedicatedServer` (that method's control flow happened not to need a stack-map-frame merge involving an external type), but broke immediately against `MinecraftServer.class` with `TypeNotPresentException: Type net/minecraft/server/level/DemoMode not present` - a real, latent bug in the original `server_start`-only code, not merely a test artifact (confirmed by reproducing the fix's necessity with a `URLClassLoader` standing in for Mojang's bundler classloader, pointing at the real extracted game classes). Fixed by overriding `ClassWriter.getClassLoader()` to return the classloader `ClassFileTransformer.transform(...)` was actually called with - the *correct* one, always available, just not consulted by default. This also retroactively hardens `server_start` against the same class of bug for any future, larger, or differently-shaped hook target.
+- **Verified live**, same run as `server_start` (`mods/hello/main.py` now also has an `@server_stop` handler):
+  ```
+  [Server thread/INFO]: Stopping server
+  [ThaiFlowMC/Minecraft] Real Minecraft server is stopping
+  hello mod saw the server stopping!
+  ```
+  The third line is the mod's Python `@server_stop` handler actually running, printed *after* real Minecraft's own "Stopping server" log line and *before* the process exits - the full chain, live, both directions of the lifecycle now proven the same way.
 
 ## `player_join`: found, not yet built
 

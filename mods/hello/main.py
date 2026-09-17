@@ -14,3 +14,8 @@ def test_event(data):
 @server_start
 def ready(server):
     server.broadcast("hello mod is ready!")
+
+
+@server_stop
+def bye(server):
+    print("hello mod saw the server stopping!")

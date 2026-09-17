@@ -15,6 +15,7 @@ class MinecraftHooksTest {
     @AfterEach
     void resetHook() {
         MinecraftHooks.setOnServerStarted(null);
+        MinecraftHooks.setOnServerStopping(null);
     }
 
     @Test
@@ -41,6 +42,29 @@ class MinecraftHooksTest {
         MinecraftHooks.fireServerStarted();
 
         assertEquals(0, calls.get());
+    }
+
+    @Test
+    void fireServerStoppingRunsTheRegisteredCallback() {
+        AtomicInteger calls = new AtomicInteger();
+        MinecraftHooks.setOnServerStopping(calls::incrementAndGet);
+
+        MinecraftHooks.fireServerStopping();
+
+        assertEquals(1, calls.get());
+    }
+
+    @Test
+    void startAndStopCallbacksAreIndependent() {
+        AtomicInteger startCalls = new AtomicInteger();
+        AtomicInteger stopCalls = new AtomicInteger();
+        MinecraftHooks.setOnServerStarted(startCalls::incrementAndGet);
+        MinecraftHooks.setOnServerStopping(stopCalls::incrementAndGet);
+
+        MinecraftHooks.fireServerStopping();
+
+        assertEquals(0, startCalls.get());
+        assertEquals(1, stopCalls.get());
     }
 
     /**

@@ -23,6 +23,7 @@ class RealMinecraftAdapterTest {
     @AfterEach
     void resetHook() {
         MinecraftHooks.setOnServerStarted(null);
+        MinecraftHooks.setOnServerStopping(null);
     }
 
     @Test
@@ -38,17 +39,33 @@ class RealMinecraftAdapterTest {
     }
 
     @Test
-    void stopDisconnectsTheHook() {
+    void startAlsoWiresTheHookToServerStopOnTheEventBus() {
         SimpleEventBus eventBus = new SimpleEventBus();
         List<GameServer> received = new ArrayList<>();
-        eventBus.subscribe("server_start", payload -> received.add((GameServer) payload));
+        eventBus.subscribe("server_stop", payload -> received.add((GameServer) payload));
+
+        new RealMinecraftAdapter(eventBus).start();
+        MinecraftHooks.fireServerStopping();
+
+        assertEquals(1, received.size());
+    }
+
+    @Test
+    void stopDisconnectsBothHooks() {
+        SimpleEventBus eventBus = new SimpleEventBus();
+        List<GameServer> startReceived = new ArrayList<>();
+        List<GameServer> stopReceived = new ArrayList<>();
+        eventBus.subscribe("server_start", payload -> startReceived.add((GameServer) payload));
+        eventBus.subscribe("server_stop", payload -> stopReceived.add((GameServer) payload));
 
         RealMinecraftAdapter adapter = new RealMinecraftAdapter(eventBus);
         adapter.start();
         adapter.stop();
         MinecraftHooks.fireServerStarted();
+        MinecraftHooks.fireServerStopping();
 
-        assertTrue(received.isEmpty());
+        assertTrue(startReceived.isEmpty());
+        assertTrue(stopReceived.isEmpty());
     }
 
     @Test
