@@ -82,10 +82,12 @@ public final class PythonRuntime implements ModEntrypointExecutor, AutoCloseable
                 .allowHostClassLookup(className -> false)
                 // Deny-by-default: everything below is an explicit, individual
                 // restriction. GraalVM's SandboxPolicy would normally enforce all
-                // of this (and more) as one named policy, but it refuses to
-                // validate for the "python" language at any level stricter than
-                // TRUSTED (confirmed empirically - see docs/ARCHITECTURE.md), so
-                // there is no single call that replaces this list.
+                // of this (and more) as one named policy, but on this project's
+                // current GraalPy artifacts/runtime it refuses to validate for
+                // the "python" language stricter than TRUSTED (confirmed
+                // empirically, not a settled GraalPy-wide limitation - see
+                // docs/ARCHITECTURE.md), so there is no single call that
+                // replaces this list today.
                 .allowIO(ioAccessFor(mod))
                 .allowEnvironmentAccess(EnvironmentAccess.NONE)
                 .allowCreateThread(false)

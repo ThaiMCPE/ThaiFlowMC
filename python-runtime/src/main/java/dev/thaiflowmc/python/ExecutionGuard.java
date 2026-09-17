@@ -13,11 +13,13 @@ import org.graalvm.polyglot.Context;
  * broken or malicious mod (an infinite loop, a deliberate hang) cannot
  * freeze the caller - the server's own thread, in real Minecraft use.
  *
- * <p>GraalPy has no reliable per-call CPU budget on a plain JDK (see
- * docs/ARCHITECTURE.md's security section: {@code SandboxPolicy}'s stricter
- * levels, which would offer this, refuse to validate for the {@code python}
- * language at all). This uses the one cancellation mechanism that does
- * work everywhere: closing the mod's {@link Context} from another thread
+ * <p>The GraalPy artifacts and plain-JDK runtime this project currently
+ * depends on have no reliable per-call CPU budget (see docs/ARCHITECTURE.md's
+ * security section: {@code SandboxPolicy}'s stricter levels, which would
+ * offer this, refuse to validate for {@code python} on this specific
+ * configuration - not a settled fact about GraalPy in general). This uses
+ * the one cancellation mechanism that does work everywhere: closing the
+ * mod's {@link Context} from another thread
  * interrupts whatever it's currently running, at the next Truffle
  * safepoint, with a cancellation {@code PolyglotException} on the
  * executing thread. That also ends the mod's ability to handle any future

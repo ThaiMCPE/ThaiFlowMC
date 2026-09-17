@@ -67,17 +67,21 @@ Mods are **untrusted by default.** Every restriction below applies to every mod 
 
 ### The SandboxPolicy finding
 
-GraalVM's `Context.Builder.sandbox(SandboxPolicy)` is the officially documented way to get a named, validated bundle of restrictions (`CONSTRAINED`, `ISOLATED`, `UNTRUSTED`) - including isolate-based heap separation at the stricter levels. **It does not work for GraalPy.** Confirmed empirically (not from documentation) while building this:
+GraalVM's `Context.Builder.sandbox(SandboxPolicy)` is the officially documented way to get a named, validated bundle of restrictions (`CONSTRAINED`, `ISOLATED`, `UNTRUSTED`) - including isolate-based heap separation at the stricter levels, and GraalVM's own documentation lists these as available for sandboxing untrusted guest code in general. **It does not work for the specific GraalPy artifacts, version, and plain-JDK (non-native-image) runtime configuration this project currently depends on.** Confirmed empirically (not from documentation) while building this:
 
 ```
 java.lang.IllegalArgumentException: The validation for the given sandbox policy CONSTRAINED failed.
 The language python can only be used up to the TRUSTED sandbox policy.
 ```
 
-This is true at every level stricter than `TRUSTED`, for every one of `CONSTRAINED`/`ISOLATED`/`UNTRUSTED`, on the exact GraalPy version this project depends on. Practically, this means:
+This is true at every level stricter than `TRUSTED`, for every one of `CONSTRAINED`/`ISOLATED`/`UNTRUSTED`, reproduced against the exact dependency versions and runtime this project uses (see `python-runtime/build.gradle.kts`: plain `org.graalvm.polyglot:polyglot` + `python-community` on a stock OpenJDK, not a GraalVM JDK, not native-image, not any GraalPy-specific "sandboxed" distribution or configuration). **This is not a settled claim that GraalPy can never support stricter sandbox policies** - a different runtime (an actual GraalVM JDK with native-image/polyglot-isolate support), a different GraalPy build variant, or a future GraalPy release may change this, and that possibility hasn't been investigated here. It's a fact about *this stack today*, worth re-checking before assuming it's permanent. Practically, for now, this means:
 
-- **No isolate-based heap limit is available.** Every mod's Python allocations share the host JVM's ordinary heap. Nothing in this stack bounds how much of it one mod can consume - see `PythonSandboxSecurityTest.memoryAbuseIsNotYetContained_knownGap` and "Future: Strict Isolation Mode" in `docs/ROADMAP.md`, which is the planned real fix (an OS process boundary per mod, with real OS-level memory limits).
+- **No isolate-based heap limit is available in this configuration.** Every mod's Python allocations share the host JVM's ordinary heap. Nothing in this stack bounds how much of it one mod can consume - see `PythonSandboxSecurityTest.memoryAbuseIsNotYetContained_knownGap` and "Future: Strict Isolation Mode" in `docs/ROADMAP.md`, which is the planned real fix (an OS process boundary per mod, with real OS-level memory limits - a fix that doesn't depend on GraalVM ever supporting stricter `SandboxPolicy` levels for this configuration).
 - Every other restriction `SandboxPolicy` would have bundled together is instead applied **individually**, directly on `Context.Builder`, in `PythonRuntime.execute(...)`. There is no single call that replaces this list; each line is a deliberate, separately-justified restriction.
+
+### Not a claim of 100% safety
+
+Nothing here should be read as "a mod cannot escape this sandbox." In particular: **native code can bypass JVM/Truffle sandboxing outright**, which is exactly why native access and native Python extensions are denied by default (`allowNativeAccess(false)` - see the table below) rather than merely discouraged. Denying it is a real, load-bearing control, not a formality; if a future permission ever needs to allow native access for a specific, trusted mod, that is a `TRUSTED`-tier decision (see "Permissions" below) with consequences worth re-reading this paragraph over, not a checkbox to flip casually. The restrictions in this section are what this stack does today to make mods meaningfully harder to weaponize and easier to contain when they misbehave - they are defense in depth, not a guarantee.
 
 ### What's denied by default, and how
 
