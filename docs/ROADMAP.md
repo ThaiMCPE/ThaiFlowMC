@@ -73,8 +73,25 @@ In priority order (matching "server start, then player join, then server stop" f
    ./gradlew :launcher:realMinecraftIntegration
    ```
 5. Extend `RealMinecraftAdapter`'s payload to wrap the actual live server instance (today it fires with a placeholder `UnconnectedGameServer` - see its Javadoc, and the log line above) so `server.broadcast(...)` really reaches players, matching what `SimulatedMinecraftAdapter` already fakes.
-6. Extend to `player_join` (wrap the real player object behind `Player`), then `server_stop`.
-7. Only after that: begin the item/block/entity APIs the top-level spec explicitly says to defer.
+6. **`player_join`'s real hook point is already found and verified structurally** (same rigor as `server_start` - real 26.3 bytecode, not a guess), but not yet built or live-verified - see "player_join: found, not yet built" below for exactly why and what's left.
+7. `server_stop`, once `player_join` is real.
+8. Only after that: begin the item/block/entity APIs the top-level spec explicitly says to defer.
+
+## `player_join`: found, not yet built
+
+The real hook point was located the same way `server_start`'s was, against the same real 26.3 server jar:
+
+- **Class/method**: `net.minecraft.server.players.PlayerList.placeNewPlayer(Connection, ServerPlayer, CommonListenerCookie)` - real, unobfuscated names, directly visible in the class file.
+- **Log line**: right after the server's own `LOGGER.info("{}[{}] logged in with entity id {} at ({}, {}, {})", ...)` call (bytecode offset 145 in this build) - the same "a player just joined" moment Bukkit/Forge/Fabric-style loaders also hook.
+- **The player's name is directly available** at that point via `ServerPlayer.getPlainTextName(): String` (also a real, unobfuscated method) on the `ServerPlayer` parameter (local variable slot 2, i.e. `aload_2` in the disassembly) - no reflection needed just to get a name.
+
+Two things are different enough from `server_start` to be worth building deliberately rather than copy-pasting the pattern:
+
+1. **The log call's shape is different**: `Logger.info(String, Object[])` (a varargs array) here, versus `Logger.info(String, Object)` for `server_start`'s single-argument call. `ServerStartHookTransformer`'s "arm on the marker string, inject after the next method call" logic still applies, but the *marker string itself* (`"{}[{}] logged in with entity id {} at ({}, {}, {})"`) is far more specific and far less likely to be a stable, community-recognized anchor than `"Done ("` - a second transformer (or a generalized one taking the marker and the argument-passing convention as parameters) is the honest way to build this, not reusing `ServerStartHookTransformer` as-is.
+
+2. **This cannot be verified live in this environment the way `server_start` was.** Booting the real dedicated server needs only the server jar - proven above. Triggering `player_join` for real needs an actual Minecraft *client* to connect to it, which this headless environment does not have and cannot reasonably fake (a hand-rolled fake client speaking the real login/handshake protocol is a project of its own). So while the hook point is genuinely verified (real bytecode, real method, real log line, findable the same rigorous way as `server_start`), actually wiring `MinecraftHooks.firePlayerJoined(...)` and confirming a Python `@player_join` handler runs from a real join is **not something this session can honestly claim to have proven live** - it would need to ship as "structurally verified, like server_start's ASM-transform tests were, but not live-confirmed" rather than "proven end to end."
+
+Given that distinction, this is left as researched-and-ready rather than built, so the eventual implementation's test claims stay as precise as everything else in this document.
 
 ## Future refactor (not yet): per-version adapter layout
 
