@@ -21,9 +21,10 @@ import org.objectweb.asm.util.CheckClassAdapter;
  * goes in, patched bytecode comes out, and running the patched class fires
  * {@link MinecraftHooks}. The exact real-Minecraft injection site (the
  * "Done (...)" log line in {@code DedicatedServer.initServer()}) was
- * verified by hand against the official 1.21.1 server jar - see
- * docs/ROADMAP.md - so this test uses a small fixture matching that shape
- * instead of depending on a 50MB network download in the test suite.
+ * verified by hand against the official server jars for both 26.3
+ * (ThaiFlowMC's primary target) and 1.21.1 - see docs/ROADMAP.md - so this
+ * test uses a small fixture matching that shape instead of depending on a
+ * network download in the test suite.
  */
 class ServerStartHookTransformerTest {
 

@@ -14,7 +14,7 @@ discover mod -> parse metadata -> resolve dependencies -> start Python -> execut
 `minecraft-adapter` ships two implementations of `MinecraftAdapter`:
 
 - `sim.SimulatedMinecraftAdapter`, which fires `server_start` / `server_stop` / `player_join` / `player_leave` with real `GameServer` / `Player` objects, but without an actual Minecraft server underneath. It exists specifically to let the event pipeline, the Python bridge, and the sugar decorators (`@player_join`, `@server_start`, ...) be built and tested *before* the much harder problem of hooking real Minecraft is solved.
-- `mc.RealMinecraftAdapter`, the real hook mechanism described below - built, tested, and verified against the actual Minecraft 1.21.1 server jar, but not yet wired into an automatic "launch Minecraft" command (see "What's not done" below for exactly why).
+- `mc.RealMinecraftAdapter`, the real hook mechanism described below - built, tested, and **verified live against the actual Minecraft 26.3 dedicated server** (ThaiFlowMC's primary target; also independently verified against 1.21.1). Not yet wired into the default `Launcher`/`./gradlew run` - see `:launcher:realMinecraftIntegration` below, which is intentionally a separate, manual/opt-in task.
 
 ## Why real integration took a separate hook mechanism, not Mixin
 
@@ -22,44 +22,122 @@ ThaiFlowMC's constraint is: no Fabric Loader, Fabric API, Forge, NeoForge, or Qu
 
 ## How the real hook was found and built
 
-1. **Obtaining a Minecraft server jar legitimately.** Mojang publishes a version manifest and per-version metadata (including a server jar download URL and, since 1.14.4, official server-side mappings) at `piston-meta.mojang.com` / `piston-data.mojang.com`. This was fetched the way any dev tool does - directly from Mojang's own CDN, under Mojang's EULA, and is never committed to this repository or redistributed by us. (The 1.21.1 server jar is itself a small "bundler" wrapper - `net.minecraft.bundler.Main` - whose `META-INF/versions/1.21.1/server-1.21.1.jar` entry holds the actual game code and is what the hook mechanism below actually inspects.)
+1. **Obtaining a Minecraft server jar legitimately.** Mojang publishes a version manifest and per-version metadata (including a server jar download URL and, for older versions, official server-side mappings) at `piston-meta.mojang.com` / `piston-data.mojang.com`. This was fetched the way any dev tool does - directly from Mojang's own CDN, under Mojang's EULA, and is never committed to this repository or redistributed by us. (The server jar is itself a small "bundler" wrapper - `net.minecraft.bundler.Main` - whose `META-INF/versions/<version>/server-<version>.jar` entry holds the actual game code and is what the hook mechanism below actually inspects. True for both 26.3 and 1.21.1.)
 
-2. **Deobfuscating against Mojang's official mappings** to find a real, version-specific hook point. See "Concrete next milestone" below for exactly what was found for 1.21.1. This has to be redone (or re-verified) for every targeted Minecraft version - this is the concrete meaning of "Minecraft-version-specific issue" the adapter module exists to contain.
+2. **Finding a real, version-specific hook point** - for 26.3, by reading real class/method names directly (no obfuscation to defeat, unlike 1.21.1, which needed Mojang's official mappings to deobfuscate). See "Concrete next milestone" below for exactly what was found for both. This has to be redone (or re-verified) for every targeted Minecraft version - this is the concrete meaning of "Minecraft-version-specific issue" the adapter module exists to contain.
 
 3. **A loader/launch mechanism that isn't Fabric/Forge/NeoForge/Quilt.** Built as a `java.lang.instrument` Java agent (`ThaiFlowAgent`) that installs an ASM `ClassFileTransformer` (`ServerStartHookTransformer`). Unlike Fabric's "Knot" or Forge's "ModLauncher" (custom classloaders standing in front of the JVM's own class loading), a Java agent uses the JVM's own supported instrumentation hook to rewrite a class's bytecode right before it's defined - no custom classloader needed for a single hook point.
 
 4. **Wiring that hook to `EventBus.fire(...)`.** Done: `RealMinecraftAdapter` registers a callback with `MinecraftHooks`, which the injected bytecode calls; the callback fires `"server_start"` on the same `EventBus` every other mod hook goes through.
 
+## Primary target: Minecraft 26.3
+
+ThaiFlowMC targets **26.3** (Mojang's current stable release as of this writing, requiring **Java 25** - the project's `--release` compile target was bumped from 21 to 25 to match). As a new project, ThaiFlowMC does not carry compatibility baggage for older versions; 1.21.1 was this project's original proving ground before the primary target moved to 26.3, and is kept only as secondary verification evidence below, not as a supported version.
+
+**A significant discovery from this migration: Mojang has stopped obfuscating the dedicated server's code as of 26.3.** Every one of the ~7,760 classes in the 26.3 server jar lives under its real `net.minecraft.*` package with real names (compare: 1.21.1 obfuscated the vast majority of classes to short names like `apn`, `l`, `dcs`). This also explains why 26.3's version manifest publishes no `server_mappings` at all - there is nothing left to map. If this trend holds, future ThaiFlowMC version bumps get meaningfully easier: no deobfuscation step, and any hook point can be found by reading real class/method names directly.
+
 ## Concrete next milestone
 
 In priority order (matching "server start, then player join, then server stop" from the product brief):
 
-1. ~~Pick and pin one Minecraft version~~ **Done: 1.21.1** (Java 21, matching the `--release 21` compile target already set project-wide).
-2. ~~Locate the real hook point~~ **Done, verified by hand** against Mojang's official 1.21.1 server jar and server mappings (SHA-1 `59353fb40c36d304f2035d51e7d6e6baa98dc05c`, downloaded directly from `piston-data.mojang.com` - the same source any launcher uses, never redistributed by this repo):
-   - The dedicated server's "finished starting" signal is `net.minecraft.server.dedicated.DedicatedServer.initServer()` (obfuscated in this build to class `apn`, method `e()`), which logs `"Done ({})! For help, type \"help\""` right before returning `true`.
-   - This is the exact log line every player and every other modloader also treats as "the server is up."
+1. ~~Pick and pin one Minecraft version~~ **Done: 26.3** (Java 25).
+2. ~~Locate the real hook point~~ **Done, verified by hand** against Mojang's official 26.3 server jar (SHA-1 `33680f5f2ac32864d6d7cf5e56a705fdb3e05f4c`, downloaded directly from `piston-data.mojang.com` - the same source any launcher uses, never redistributed by this repo):
+   - The dedicated server's "finished starting" signal is `net.minecraft.server.dedicated.DedicatedServer.initServer()` - the real, unobfuscated method name, directly visible in the class file - which logs `"Done ({})! For help, type \"help\""` right before returning `true`.
+   - This is the exact log line every player and every other modloader also treats as "the server is up," and is unchanged from 1.21.1 despite the method's name going from obfuscated (`apn.e()`) to plain.
 3. ~~Build a non-Fabric/Forge/Quilt hook mechanism~~ **Done**, in `minecraft-adapter`'s `dev.thaiflowmc.adapter.mc` package:
-   - `MinecraftHooks` - a small, stable, version-independent call target (`fireServerStarted()`), so Minecraft's own churn (obfuscated names change every version) never has to touch anything above the adapter.
-   - `ServerStartHookTransformer` - a plain ASM `ClassFileTransformer`. Rather than hardcoding the obfuscated class/method name above (which is already wrong for the next Minecraft version), it scans loaded classes for the literal `"Done ("` string constant and injects `INVOKESTATIC MinecraftHooks.fireServerStarted()V` right after the log call that uses it. Verified two ways:
+   - `MinecraftHooks` - a small, stable, version-independent call target (`fireServerStarted()`), so Minecraft's own churn (obfuscated or not, names still change every version) never has to touch anything above the adapter.
+   - `ServerStartHookTransformer` - a plain ASM `ClassFileTransformer`. Rather than hardcoding a class/method name (which was already wrong going from 1.21.1 to 26.3, obfuscation or no), it scans loaded classes for the literal `"Done ("` string constant and injects `INVOKESTATIC MinecraftHooks.fireServerStarted()V` right after the log call that uses it. **This code is completely unchanged between the 1.21.1 and 26.3 verifications below** - proof the string-matching design choice pays off across versions, exactly as intended. Verified three ways:
      - Unit-tested (`ServerStartHookTransformerTest`) against a small fixture matching the same shape, including that the patched bytecode still passes ASM's `CheckClassAdapter` verification and, loaded and run, actually calls the hook (and that an *unpatched* class and classes without the marker never do).
-     - Additionally hand-verified against the **real, extracted `apn.class`** from the downloaded 1.21.1 server jar: the transformer correctly finds and patches it, producing (structurally verified) bytecode where the injected call sits exactly here:
+     - Hand-verified against the **real, extracted `net/minecraft/server/dedicated/DedicatedServer.class`** from the downloaded 26.3 server jar: the transformer correctly finds and patches it, producing (structurally verified) bytecode where the injected call sits exactly here:
        ```
+       GETSTATIC net/minecraft/server/dedicated/DedicatedServer.LOGGER : Lorg/slf4j/Logger;
        LDC "Done ({})! For help, type \"help\""
        ALOAD 8
        INVOKEINTERFACE org/slf4j/Logger.info (Ljava/lang/String;Ljava/lang/Object;)V (itf)
        INVOKESTATIC dev/thaiflowmc/adapter/mc/MinecraftHooks.fireServerStarted ()V   <- injected
        ```
-       (This one-off check isn't part of the automated test suite - it needs the real, 50MB, network-fetched server jar, which is never downloaded automatically or committed.)
-   - `ThaiFlowAgent` - the `-javaagent` entry point that installs the transformer; `minecraft-adapter`'s jar manifest already declares `Premain-Class`/`Agent-Class`.
-   - `RealMinecraftAdapter implements MinecraftAdapter` - wires `MinecraftHooks` to the existing `EventBus`, firing `"server_start"` (tested end-to-end via `MinecraftHooks.fireServerStarted()`, exactly as the injected bytecode would call it).
-4. **Not done, and deliberately not automated:** actually launching the real dedicated server. Running it requires accepting Mojang's EULA (`eula.txt` with `eula=true`) - a legal agreement, and the server operator's decision, not something ThaiFlowMC decides on anyone's behalf. `RealMinecraftAdapter.isEulaAccepted(Path)` only ever *reads* that file; nothing in this codebase writes it. Once a server operator has accepted the EULA themselves, the manual launch command is:
-   ```bash
-   java -javaagent:minecraft-adapter/build/libs/minecraft-adapter-<version>.jar -jar server.jar nogui
+     - Also independently re-verified against the equivalent, obfuscated `apn.class` from the 1.21.1 server jar (same injected call, same shape) - see the earlier revision of this document for that transcript. (Neither one-off check is part of the automated test suite - both need a real, network-fetched server jar, which is never downloaded automatically outside the opt-in Gradle task below, or committed.)
+   - `ThaiFlowAgent` - the `-javaagent` entry point that installs the transformer. It also solves a real classloading wrinkle: Mojang's server bundler (`net.minecraft.bundler.Main`) loads the actual game through a fresh `URLClassLoader` whose parent deliberately skips the application classloader (to isolate its own library versions). The injected call to `MinecraftHooks` couldn't resolve through that isolated loader at first (`NoClassDefFoundError`, caught live in testing). The fix: extract just the tiny, dependency-free `MinecraftHooks` class into its own in-memory jar and append *only that* to the JVM's bootstrap classloader search path (`Instrumentation.appendToBootstrapClassLoaderSearch`), which every classloader in the JVM ultimately delegates to. Appending the *whole* agent jar was tried first and broke `RealMinecraftAdapter` itself (it needs SLF4J, which bootstrap can't see) - worth calling out since it's an easy mistake to repeat.
+   - **A second, subtler classloading bug found only by actually running the live server**, fixed in `MinecraftHooks` itself: even after the fix above made the class *resolvable* from Mojang's isolated classloader, live testing showed the registered callback still silently never fired. Diagnosis (`System.identityHashCode` + `getClassLoader()` printed from both sides) proved the isolated classloader's `MinecraftHooks` and the application classloader's `MinecraftHooks` were two distinct `Class` objects with two independent static fields - `appendToBootstrapClassLoaderSearch` makes the *name* resolvable everywhere, but does not guarantee only one `Class` object gets defined for it. The fix: `MinecraftHooks` no longer stores the callback in a static field at all; it stores it in `System.getProperties()`, the one object guaranteed to be the exact same instance everywhere in the JVM regardless of how many times the class itself is defined. `MinecraftHooksTest.callbackFiresEvenWhenInvokedThroughAnIndependentlyLoadedDuplicateClass` reproduces the duplicate-definition scenario directly (a second `URLClassLoader` with no parent) so this can't silently regress.
+   - `RealMinecraftAdapter implements MinecraftAdapter` - wires `MinecraftHooks` to the existing `EventBus`, firing `"server_start"`.
+   - `RealMinecraftLauncher` (in `launcher`) and the `:launcher:realMinecraftIntegration` Gradle task - runs the full ThaiFlowMC pipeline (discover mods, start Python, load them) and then hands off to the real `net.minecraft.bundler.Main` in the same JVM, with the agent attached.
+4. ~~Actually launch the real dedicated server~~ **Done, live, end to end, with the full chain confirmed**: with explicit operator authorization to accept Mojang's EULA for local integration testing (`RealMinecraftAdapter.isEulaAccepted(Path)` still only ever *reads* `eula.txt`; nothing in this codebase writes it - the acceptance was a deliberate, explicit action taken once, outside this code path), the real 26.3 dedicated server booted with the agent attached, our mods (`mods/hello`, `mods/ruby_mod`) loaded and ran their Python, and after the real server printed `Done (2.229s)! For help, type "help"`, the console showed:
    ```
-   That is the one remaining step to see `server_start` fire from a real, running Minecraft server end to end.
-5. Once that manual run is confirmed: extend `RealMinecraftAdapter`'s payload to wrap the actual live server instance (today it fires with a placeholder `UnconnectedGameServer` - see its Javadoc) so `server.broadcast(...)` really reaches players, matching what `SimulatedMinecraftAdapter` already fakes.
+   [ThaiFlowMC/Minecraft] Real Minecraft server finished starting
+   [ThaiFlowMC/Minecraft] broadcast("hello mod is ready!") ignored: not yet wired to the live Minecraft server (see docs/ROADMAP.md)
+   ```
+   That second line is `mods/hello/main.py`'s `@server_start` Python handler calling `server.broadcast(...)`, proving the *entire* chain live: **real Minecraft starts -> injected bytecode fires -> `MinecraftHooks` -> `RealMinecraftAdapter` -> `EventBus` -> Python's `@server_start` handler runs** - with no Fabric, Forge, NeoForge, or Quilt anywhere underneath. The server also shut down cleanly afterward via the normal `stop` console command. To reproduce:
+   ```bash
+   # once, manually, after you have accepted https://aka.ms/MinecraftEULA yourself:
+   echo "eula=true" > run/eula.txt
+   ./gradlew :launcher:realMinecraftIntegration
+   ```
+5. Extend `RealMinecraftAdapter`'s payload to wrap the actual live server instance (today it fires with a placeholder `UnconnectedGameServer` - see its Javadoc, and the log line above) so `server.broadcast(...)` really reaches players, matching what `SimulatedMinecraftAdapter` already fakes.
 6. Extend to `player_join` (wrap the real player object behind `Player`), then `server_stop`.
 7. Only after that: begin the item/block/entity APIs the top-level spec explicitly says to defer.
+
+## Future refactor (not yet): per-version adapter layout
+
+`ServerStartHookTransformer`'s string-matching approach happened to transfer unchanged from 1.21.1 to 26.3, but that is a lucky property of this *one* hook, not a architecture to lean on indefinitely - a future hook (e.g. `player_join`) may need a real, version-specific method signature or field offset that a string constant can't identify. Once more than one hook exists, `minecraft-adapter` should split into something like:
+
+```
+minecraft-adapter/
+├── common/        # MinecraftAdapter, MinecraftHooks, ThaiFlowAgent - version-independent
+└── mc-26.3/       # hooks + any mappings specific to 26.3
+```
+
+so that "Minecraft changes -> edit the versioned adapter folder" and "Python mod exists -> never has to change" stay true even as more, less string-friendly hooks are added. Not worth doing yet with a single hook and a single supported version - revisit once `player_join` is real and a second Minecraft version is on the table.
+
+## Future: Strict Isolation Mode (security architecture target)
+
+Today every mod's Python runs as a GraalPy `Context` *inside the same JVM process* as Minecraft (see "Isolation model" in `docs/ARCHITECTURE.md`). That is `STANDARD` mode. ThaiFlowMC's longer-term security target is a second mode:
+
+```
+STANDARD  - GraalPy sandbox inside the Minecraft process (today)
+STRICT    - each mod runs as its own OS process (or equivalent strong boundary),
+            supervised and spoken to only through a validated IPC protocol
+```
+
+`UNTRUSTED` mod trust level + `STRICT` isolation is meant to eventually be the strongest safety combination for a server operator running mods from strangers.
+
+Target architecture for `STRICT`:
+
+```
+Minecraft JVM
+     |
+     | validated IPC / RPC
+     v
+ThaiFlowMC Mod Supervisor
+     +-- Mod Worker A <- Python mod A
+     +-- Mod Worker B <- Python mod B
+     +-- Mod Worker C <- Python mod C
+```
+
+Requirements once `STRICT` is built:
+
+- Each mod runs in its own OS process; a mod crash or hang never crashes or freezes Minecraft or another mod, and a hung worker can be terminated independently.
+- Each worker gets independent CPU/memory/time limits.
+- Workers never receive raw Java or Minecraft objects - only messages representing stable ThaiFlowMC concepts (see the flow below).
+- Every message from a worker is untrusted input: message type, payload size, ids, arguments, permissions, and rate limits are all validated before any Minecraft operation runs.
+- Permissions/capabilities (see the security section below) are enforced at the IPC boundary, not just inside the worker.
+- Mods cannot talk to other mod workers unless explicitly permitted; per-mod storage stays isolated exactly as it would in-process.
+- Worker restart/termination should be possible without restarting Minecraft, where practical.
+
+Example call flow under `STRICT`, contrasted with today's `STANDARD` flow:
+
+```
+STANDARD (today):  Python mod -> player.say("Hello") -> PythonBridge (in-process call) -> EventBus/adapter -> Minecraft
+STRICT (future):   Python mod -> player.say("Hello") -> IPC request -> permission + argument validation -> Minecraft adapter -> Minecraft
+```
+
+**The one rule that matters most for everything built between now and then:** a mod author's Python code must never need to know or care which mode it's running under. `@player_join` / `player.say(...)` must look and behave identically whether the call underneath is an in-process bridge call or a validated IPC round-trip. Concretely, that means designing every new wrapper, event, DTO, permission, and lifecycle interface so it could be serialized across a process boundary, even while today's implementation just calls straight through.
+
+**Honest note on where today's code already satisfies this, and where it doesn't yet:**
+
+- Already transport-friendly: the Python-facing API (`item(...)`, `@event(name)`, `@load`, the sugar decorators) never exposes a Java/GraalPy type to mod authors - see `thaiflow_bootstrap.py`. `EventBus`'s events are plain strings + plain-old-data payloads (`Player`, `GameServer` are already just interfaces with primitive-typed methods, not raw Minecraft objects). The `ModHandle`/`ModEntrypointExecutor` contract between `loader` and `python-runtime` is already just an id, a path, and a filename - trivially serializable.
+- Not transport-friendly yet: `PythonBridge.subscribe(String eventName, Value callback)` hands GraalPy a live, in-process `org.graalvm.polyglot.Value` handle to the Java side, and calls `callback.execute(payload)` directly (`PythonBridge.java`). A `Value` cannot cross a process boundary. Moving to `STRICT` means this becomes "the worker declares it wants event X" (a serializable subscription message) with actual dispatch happening as a separate IPC call *into* the worker when Java fires that event - a real, but contained, change localized to `python-runtime`'s bridge layer, not to the Python API mod authors write.
+
+Not blocking current development: `STANDARD` mode (this repository's entire focus today) is a legitimate, real security boundary on its own via GraalPy sandboxing (see the security section below), and nothing above requires `STRICT` to exist yet. This section exists so later work doesn't have to fight today's decisions.
 
 ## Explicitly out of scope until the above lands
 

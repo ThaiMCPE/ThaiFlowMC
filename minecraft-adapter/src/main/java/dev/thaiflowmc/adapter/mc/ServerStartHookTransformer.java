@@ -15,15 +15,19 @@ import org.objectweb.asm.Opcodes;
  * it - using plain ASM bytecode rewriting via a {@code java.lang.instrument}
  * agent, not Mixin, and not Fabric/Forge/NeoForge/Quilt.
  *
- * <p>This was verified by hand against the official Mojang 1.21.1 server
- * jar (see docs/ROADMAP.md): the log line lives in
- * {@code net.minecraft.server.dedicated.DedicatedServer.initServer()}
- * (obfuscated to class {@code apn}, method {@code e()} in that build).
- * Rather than hardcoding that obfuscated name - which is different for
- * every Minecraft version and would silently stop matching on an update -
- * this transformer looks for the actual log message string constant
- * ({@value #MARKER}), which Mojang has kept stable across many versions and
- * is far less likely to silently change than an obfuscated identifier.
+ * <p>This was verified by hand against the official Mojang server jar for
+ * ThaiFlowMC's primary target, <b>26.3</b>, and against 1.21.1 (see
+ * docs/ROADMAP.md for both): the log line lives in
+ * {@code net.minecraft.server.dedicated.DedicatedServer.initServer()} in
+ * both. 1.21.1 obfuscates that to class {@code apn}, method {@code e()};
+ * 26.3 ships this class under its real name with no obfuscation at all
+ * (Mojang has stopped publishing official mappings as of this version,
+ * consistent with there being nothing left to map). Rather than hardcoding
+ * either name - which is version-specific and would silently stop matching
+ * on the next update, obfuscated or not - this transformer looks for the
+ * actual log message string constant ({@value #MARKER}), which Mojang has
+ * kept stable across both versions checked and is far less likely to
+ * silently change than a class or method identifier.
  */
 public final class ServerStartHookTransformer implements ClassFileTransformer {
 

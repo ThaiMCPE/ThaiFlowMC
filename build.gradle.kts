@@ -14,12 +14,13 @@ allprojects {
 subprojects {
     apply(plugin = "java-library")
 
-    // Minecraft 1.20.5+ requires Java 21, so all ThaiFlowMC modules target that
-    // language level. We compile with `--release 21` rather than a Gradle Java
-    // toolchain so the build doesn't need to provision a separate JDK.
+    // ThaiFlowMC's primary Minecraft target (26.3) requires Java 25, so all
+    // modules target that language level. We compile with `--release 25`
+    // rather than a Gradle Java toolchain so the build doesn't need to
+    // provision a separate JDK.
     tasks.withType<JavaCompile> {
         options.encoding = "UTF-8"
-        options.release.set(21)
+        options.release.set(25)
     }
 
     tasks.withType<Test> {
